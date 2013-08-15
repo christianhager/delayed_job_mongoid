@@ -16,16 +16,14 @@ module Delayed
         field :last_error,  :type => String
         field :queue,       :type => String
 
-        index ([[:locked_by, -1], [:priority, 1], [:run_at, 1]])
+        index ({locked_by: -1, priority: 1, run_at: 1})
 
         before_save :set_default_run_at
 
         def self.before_fork
-          ::Mongoid.master.connection.close
         end
 
         def self.after_fork
-          ::Mongoid.master.connection.connect
         end
 
         def self.db_time_now
@@ -52,15 +50,7 @@ module Delayed
           ]
 
           begin
-            result = self.db.collection(self.collection.name).find_and_modify(
-              :query  => conditions,
-              :sort   => [['locked_by', -1], ['priority', 1], ['run_at', 1]],
-              :update => {"$set" => {:locked_at => right_now, :locked_by => worker.name}}
-            )
-
-            # Return result as a Mongoid document.
-            # When Mongoid starts supporting findAndModify, this extra step should no longer be necessary.
-            self.find(result["_id"]) unless result.nil?
+            self.where(conditions).find_and_modify({"$set" => {:locked_at => right_now, :locked_by => worker.name}})
           rescue Mongo::OperationFailure
             nil # no jobs available
           end
@@ -68,7 +58,7 @@ module Delayed
 
         # When a worker is exiting, make sure we don't have any locked jobs.
         def self.clear_locks!(worker_name)
-          self.collection.update({:locked_by => worker_name}, {"$set" => {:locked_at => nil, :locked_by => nil}}, :multi => true)
+          self.collection.find({:locked_by => worker_name}).update_all({"$set" => {:locked_at => nil, :locked_by => nil}})
         end
 
         def reload(*args)
